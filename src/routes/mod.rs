@@ -5,7 +5,7 @@ mod v1client;
 mod assets;
 
 pub fn routes() -> Scope {
-  Scope::new("/")
+  Scope::new("")
     .service(assets::assets)
     .service(api())
 }

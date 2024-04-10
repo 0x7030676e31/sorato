@@ -1,0 +1,22 @@
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.13.1",
+    "solid-icons": "^1.1.0",
+    "solid-js": "^1.8.15"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2",
+    "vite-plugin-solid": "^2.10.2",
+    "vite": "^5.2.0",
+    "sass": "^1.74.1"
+  }
+}

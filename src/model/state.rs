@@ -1,10 +1,12 @@
-use std::collections::HashSet;
+use crate::AppState;
+
 use std::sync::OnceLock;
 use std::{env, fs};
 
 use serde::{Deserialize, Serialize};
 use rand::{distributions, Rng};
 use bincode::{deserialize_from, serialize_into};
+use tokio::time;
 
 const TOKEN_LENGTH: usize = 64;
 
@@ -33,12 +35,23 @@ fn create_token(length: usize) -> String {
   rand::thread_rng().sample_iter(distributions::Alphanumeric).take(length).map(char::from).collect::<String>()
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ActorClient {
+  pub id: u64,
+  pub token: String,
+  pub name: String,
+  pub has_access: bool,
+}
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct State {
-  pub actors: HashSet<String>,
+  pub actors: Vec<ActorClient>,
+  pub next_id: u64,
 
   #[serde(skip)]
-  pub codes: HashSet<String>,
+  pub this: Option<AppState>,
+  #[serde(skip)]
+  pub codes: Vec<(String, String)>, // (code, actor name)
 }
 
 impl State {
@@ -74,40 +87,76 @@ impl State {
     }
   }
 
-  pub fn create_code(&mut self) -> String {
+  pub fn next_id(&mut self) -> u64 {
+    let id = self.next_id;
+    self.next_id += 1;
+
+    id
+  }
+
+  pub fn is_authorized(&self, token: &str) -> bool {
+    self.actors.iter().any(|actor| actor.token == token && actor.has_access)
+  }
+
+  pub fn create_code(&mut self, name: String) -> String {
     let code = create_token(16);
-    self.codes.insert(code.clone());
+    self.codes.push((code.clone(), name));
     log::info!("Created code {}", code);
 
+    let code_ = code.clone();
+    let this = self.this.clone().unwrap();
+    tokio::spawn(async move {
+      time::sleep(time::Duration::from_secs(60 * 5)).await;
+      let mut state = this.write().await;
+    
+      if let Some(index) = state.codes.iter().position(|(c, _)| c == &code_) {
+        log::info!("Code {} expired", code_);
+        state.codes.remove(index);
+        state.write();
+      }
+    });
+    
     code
   }
 
   pub fn exchange_code(&mut self, code: &str) -> Option<String> {
-    log::info!("Exchanging code {}", code);
-    if self.codes.remove(code) {
-      log::info!("Code {} was exchanged", code);
-      Some(self.create_actor_token())
-    } else {
-      log::warn!("Code {} was not found", code);
-      None
-    }
-  }
+    let index = self.codes.iter().position(|(c, _)| c == code)?;
+    let (_, name) = self.codes.remove(index);
 
-  fn create_actor_token(&mut self) -> String {
     let token = create_token(TOKEN_LENGTH);
-    self.actors.insert(token.clone());
+    let id = self.next_id();
 
-    log::info!("Created actor token {}", token);
+    self.actors.push(ActorClient { id, token: token.clone(), name, has_access: true });
+    log::info!("Exchanged code for token {}", token);
+
     self.write();
-
-    token
+    Some(token)
   }
 
-  pub fn revoke_actor_token(&mut self, token: &str) -> bool {
-    log::info!("Revoking actor token {}", token);
-    let removed = self.actors.remove(token);
-    
+  pub fn rename_actor(&mut self, id: u64, name: String) -> Option<()> {
+    let actor = self.actors.iter_mut().find(|actor| actor.id == id)?;
+    log::info!("Renamed actor {} to {}", actor.name, name);
+    actor.name = name;
+
     self.write();
-    removed
+    Some(())
+  }
+
+  pub fn revoke_actor_access(&mut self, id: u64) -> Option<()> {
+    let index = self.actors.iter().position(|actor| actor.id == id)?;
+    log::info!("Revoked access for actor {}", self.actors[index].name);
+    self.actors.remove(index);
+
+    self.write();
+    Some(())
+  }
+
+  pub fn set_actor_access(&mut self, id: u64, access: bool) -> Option<()> {
+    let actor = self.actors.iter_mut().find(|actor| actor.id == id)?;
+    log::info!("Set access for actor {} to {}", actor.name, access);
+    actor.has_access = access;
+
+    self.write();
+    Some(())
   }
 }
