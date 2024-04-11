@@ -1,12 +1,17 @@
+use super::stream::{HeadSsePayload, SsePayload, IntoEvent};
 use crate::AppState;
 
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use serde::{Deserialize, Serialize};
 use rand::{distributions, Rng};
 use bincode::{deserialize_from, serialize_into};
+use tokio::sync::mpsc;
 use tokio::time;
+use actix_web_lab::sse;
+use futures::future;
 
 const TOKEN_LENGTH: usize = 64;
 
@@ -37,21 +42,61 @@ fn create_token(length: usize) -> String {
 
 #[derive(Serialize, Deserialize)]
 pub struct ActorClient {
-  pub id: u64,
+  pub id: u32,
   pub token: String,
   pub name: String,
   pub has_access: bool,
+  pub activity: Activity,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "activity", content = "timestamp")]
+pub enum Activity {
+  Online(u64),
+  Offline(u64),
+}
+
+impl Activity {
+  pub fn offline() -> Self {
+    Self::Offline(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())
+  }
+
+  pub fn online() -> Self {
+    Self::Online(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())
+  }
+
+  pub fn set_offline(&mut self) {
+    *self = Self::offline();
+  }
+
+  pub fn set_online(&mut self) {
+    *self = Self::online();
+  }
+
+  pub fn is_offline(&self) -> bool {
+    matches!(self, Self::Offline(_))
+  }
+
+  pub fn is_online(&self) -> bool {
+    matches!(self, Self::Online(_))
+  }
 }
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct State {
   pub actors: Vec<ActorClient>,
-  pub next_id: u64,
+  pub next_id: u32,
 
   #[serde(skip)]
   pub this: Option<AppState>,
   #[serde(skip)]
+  pub next_ack: u64,
+  #[serde(skip)]
   pub codes: Vec<(String, String)>, // (code, actor name)
+  #[serde(skip)]
+  pub actor_stream: Vec<(u32, mpsc::Sender<sse::Event>)>,
+  #[serde(skip)]
+  pub head_stream: Vec<mpsc::Sender<sse::Event>>,
 }
 
 impl State {
@@ -87,11 +132,18 @@ impl State {
     }
   }
 
-  pub fn next_id(&mut self) -> u64 {
+  pub fn next_id(&mut self) -> u32 {
     let id = self.next_id;
     self.next_id += 1;
 
     id
+  }
+
+  pub fn next_ack(&mut self) -> u64 {
+    let ack = self.next_ack;
+    self.next_ack += 1;
+
+    ack
   }
 
   pub fn is_authorized(&self, token: &str) -> bool {
@@ -119,44 +171,131 @@ impl State {
     code
   }
 
-  pub fn exchange_code(&mut self, code: &str) -> Option<String> {
+  pub async fn exchange_code(&mut self, code: &str) -> Option<String> {
     let index = self.codes.iter().position(|(c, _)| c == code)?;
     let (_, name) = self.codes.remove(index);
 
     let token = create_token(TOKEN_LENGTH);
     let id = self.next_id();
 
-    self.actors.push(ActorClient { id, token: token.clone(), name, has_access: true });
+    self.actors.push(ActorClient { id, token: token.clone(), name, has_access: true, activity: Activity::offline() });
     log::info!("Exchanged code for token {}", token);
 
     self.write();
+
+    let ack = self.next_ack();
+    let payload = HeadSsePayload::ActorCreated(&self.actors.last().unwrap()).into_event(ack, None);
+    self.broadcast_to_head_raw(payload).await;
+
     Some(token)
   }
 
-  pub fn rename_actor(&mut self, id: u64, name: String) -> Option<()> {
+  pub async fn rename_actor(&mut self, id: u32, name: String) -> Option<()> {
+    let ack = self.next_ack();
     let actor = self.actors.iter_mut().find(|actor| actor.id == id)?;
+    
     log::info!("Renamed actor {} to {}", actor.name, name);
     actor.name = name;
-
+    
+    let payload = HeadSsePayload::ActorRenamed(id, &actor.name).into_event(ack, None);
+    
     self.write();
+    self.broadcast_to_head_raw(payload).await;
+
     Some(())
   }
 
-  pub fn revoke_actor_access(&mut self, id: u64) -> Option<()> {
+  pub async fn revoke_actor_access(&mut self, id: u32) -> Option<()> {
     let index = self.actors.iter().position(|actor| actor.id == id)?;
     log::info!("Revoked access for actor {}", self.actors[index].name);
     self.actors.remove(index);
 
     self.write();
+    
+    let payload = HeadSsePayload::ActorDeleted(id);
+    self.broadcast_to_head(payload).await;
+
+    let payload = SsePayload::AccessRevoked;
+    self.broadcast_to_actor(id, payload).await;
+
+    self.actor_stream.retain(|(actor_id, _)| *actor_id != id);
     Some(())
   }
 
-  pub fn set_actor_access(&mut self, id: u64, access: bool) -> Option<()> {
+  pub async fn set_actor_access(&mut self, id: u32, access: bool) -> Option<()> {
     let actor = self.actors.iter_mut().find(|actor| actor.id == id)?;
     log::info!("Set access for actor {} to {}", actor.name, access);
     actor.has_access = access;
 
     self.write();
+    
+    let payload = SsePayload::AccessChanged(access);
+    self.broadcast_to_actor(id, payload).await;
+
+    let payload = HeadSsePayload::ActorAccessChanged(id, access);
+    self.broadcast_to_head(payload).await;
+
     Some(())
+  }
+
+  pub async fn broadcast_to_head(&mut self, payload: impl IntoEvent) {
+    let payload = payload.into_event(self.next_ack(), None);
+    let futures = self.head_stream.iter().map(|tx| tx.send(payload.clone()));
+
+    let results = future::join_all(futures).await;
+    for result in results {
+      if let Err(err) = result {
+        log::error!("Failed to send head event: {}", err);
+      }
+    }
+  }
+
+  pub async fn broadcast_to_head_raw(&mut self, payload: sse::Event) {
+    let futures = self.head_stream.iter().map(|tx| tx.send(payload.clone()));
+
+    let results = future::join_all(futures).await;
+    for result in results {
+      if let Err(err) = result {
+        log::error!("Failed to send head event: {}", err);
+      }
+    }
+  }
+
+  pub async fn broadcast_to_actor(&mut self, actor_id: u32, payload: SsePayload) {
+    let payload = payload.into_event(self.next_ack(), None);
+
+    let futures = self.actor_stream.iter().filter_map(|(id, tx)| if *id == actor_id { Some(tx.send(payload.clone())) } else { None });
+    let results = future::join_all(futures).await;
+
+    for result in results {
+      if let Err(err) = result {
+        log::error!("Failed to send actor event: {}", err);
+      }
+    }
+  }
+
+  pub async fn broadcast_to_actor_all(&mut self, payload: SsePayload) {
+    let payload = payload.into_event(self.next_ack(), None);
+    let futures = self.actor_stream.iter().map(|(_, tx)| tx.send(payload.clone()));
+
+    let results = future::join_all(futures).await;
+    for result in results {
+      if let Err(err) = result {
+        log::error!("Failed to send actor event: {}", err);
+      }
+    }
+  }
+
+  pub async fn broadcast_to_all(&mut self, payload: impl IntoEvent) {
+    let payload = payload.into_event(self.next_ack(), None);
+    let futures_1 = self.actor_stream.iter().map(|(_, tx)| tx.send(payload.clone()));
+    let futures_2 = self.head_stream.iter().map(|tx| tx.send(payload.clone()));
+
+    let results = future::join_all(futures_1.chain(futures_2)).await;
+    for result in results {
+      if let Err(err) = result {
+        log::error!("Failed to send event: {}", err);
+      }
+    }
   }
 }

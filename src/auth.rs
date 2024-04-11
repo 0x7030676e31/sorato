@@ -5,25 +5,16 @@ use std::env;
 
 use actix_web::{web, error, Error};
 use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
-use actix_web::middleware::Compat;
 use futures_util::future::LocalBoxFuture;
 
 pub struct Auth (bool);
 
 impl Auth {
-  pub fn new() -> Compat<Self> {
-    Compat::new(Self(false))
-  }
-
-  pub fn head() -> Compat<Self> {
-    Compat::new(Self(true))
-  }
-
-  pub fn new_raw() -> Self {
+  pub fn new() -> Self {
     Self(false)
   }
 
-  pub fn head_raw() -> Self {
+  pub fn head() -> Self {
     Self(true)
   }
 }

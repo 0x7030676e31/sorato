@@ -9,12 +9,13 @@ pub use auth::Auth;
 use actix_governor::{GovernorConfig, PeerIpKeyExtractor};
 use actix_governor::governor::middleware::NoOpMiddleware;
 use actix_governor::governor::clock::QuantaInstant;
-// use actix_web::{App, Error, HttpServer, Scope};
 use actix_web::{App, HttpServer};
-// use actix_web::body::{BoxBody, EitherBody};
 use actix_web::web::Data;
-// use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
 use tokio::sync::RwLock;
+
+// use actix_web::{App, Error, HttpServer, Scope};
+// use actix_web::body::{BoxBody, EitherBody};
+// use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
 
 mod model;
 mod routes;
@@ -57,7 +58,6 @@ async fn main() -> io::Result<()> {
   HttpServer::new(move || {
     App::new()
       .app_data(Data::new(state.clone()))
-      // .wrap(actix_cors::Cors::permissive())
       .wrap(cors::Cors)
       .service(routes::routes())
   })
