@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::{io, env};
 
-use model::state::State;
+use model::state::{SseCleanupLoop, State};
 pub use auth::Auth;
 
 use actix_governor::{GovernorConfig, PeerIpKeyExtractor};
@@ -46,6 +46,7 @@ async fn main() -> io::Result<()> {
 
   let state = State::new();
   let state = Arc::new(RwLock::new(state));
+  state.start_cleanup_loop();
 
   let state2 = state.clone();
   let mut state_ = state2.write().await;

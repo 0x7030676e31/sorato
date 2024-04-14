@@ -1,5 +1,5 @@
 import { Accessor, createSignal, onMount } from "solid-js";
-import { authorize } from "../api";
+import { authorize, setToken } from '../api';
 import styles from "./login.module.scss";
 
 export default function Login({ shown, setShown }: { shown: Accessor<boolean>, setShown: (value: boolean) => void }) {
@@ -38,7 +38,7 @@ export default function Login({ shown, setShown }: { shown: Accessor<boolean>, s
     }
 
     if (response.ok) {
-      window.localStorage.setItem("authorization", await response.text()); 
+      setToken(await response.text()); 
       setShown(false);
       return;
     }

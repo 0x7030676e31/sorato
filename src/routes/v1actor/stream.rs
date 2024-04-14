@@ -23,9 +23,14 @@ pub async fn stream(state: web::Data<AppState>, req: HttpRequest) -> Result<impl
   let mut state = state.write().await;
 
   if env::var("HEAD_TOKEN").unwrap() == auth {
+    state.head_stream.push(tx.clone());
     let ack = state.next_ack();
 
-    let payload= HeadSsePayload::Ready.into_event(ack, None);
+    let payload = HeadSsePayload::ReadyHead {
+      actors: &state.actors,
+    };
+
+    let payload= payload.into_event(ack, None);
     if let Err(err) = tx.send(payload).await {
       log::error!("Failed to send ready event: {}", err);
     }
@@ -39,11 +44,8 @@ pub async fn stream(state: web::Data<AppState>, req: HttpRequest) -> Result<impl
     None => return Err(error::ErrorUnauthorized("Unauthorized")),
   };
 
-  if !actor.has_access {
-    return Err(error::ErrorForbidden("Forbidden"));
-  }
-
   let actor_id = actor.id;  
+  let has_access = actor.has_access;
 
   if actor.activity.is_offline() {
     actor.activity.set_online();
@@ -56,7 +58,10 @@ pub async fn stream(state: web::Data<AppState>, req: HttpRequest) -> Result<impl
   state.actor_stream.push((actor_id, tx.clone()));
 
   let ack = state.next_ack();
-  let payload = SsePayload::Ready.into_event(ack, None);
+  
+  let payload = SsePayload::Ready { has_access };
+  let payload = payload.into_event(ack, None);
+  
   if let Err(err) = tx.send(payload).await {
     log::error!("Failed to send ready event: {}", err);
   }  

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::state::ActorClient;
 
 use serde::Serialize;
@@ -11,7 +13,10 @@ pub trait IntoEvent {
 #[serde(tag = "type", content = "payload")]
 #[allow(dead_code)]
 pub enum SsePayload {
-  Ready,
+  Ready {
+    has_access: bool,
+  },
+  Ping,
   AccessChanged(bool),
   AccessRevoked,
 }
@@ -20,10 +25,12 @@ pub enum SsePayload {
 #[serde(tag = "type", content = "payload")]
 #[allow(dead_code)]
 pub enum HeadSsePayload<'a> {
-  Ready,
+  ReadyHead {
+    actors: &'a Vec<ActorClient>,
+  },
   ActorCreated(&'a ActorClient),
   ActorConnected(u32),
-  ActorDisconnected(u32),
+  ActorsDisconnected(&'a HashSet<u32>),
   ActorRenamed(u32, &'a str),
   ActorAccessChanged(u32, bool),
   ActorDeleted(u32),

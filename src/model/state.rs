@@ -1,8 +1,9 @@
 use super::stream::{HeadSsePayload, SsePayload, IntoEvent};
 use crate::AppState;
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ use actix_web_lab::sse;
 use futures::future;
 
 const TOKEN_LENGTH: usize = 64;
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(15);
 
 pub fn path() -> &'static str {
   static PATH: OnceLock<String> = OnceLock::new();
@@ -50,7 +52,18 @@ pub struct ActorClient {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "activity", content = "timestamp")]
+pub struct Client {
+  pub id: u32,
+  pub token: String,
+  pub alias: String,
+  pub hostname: String,
+  pub username: String,
+  pub last_ip: String,
+  pub activity: Activity,
+}
+
+#[derive(Serialize, Deserialize)]
+// #[serde(tag = "activity", content = "timestamp")]
 pub enum Activity {
   Online(u64),
   Offline(u64),
@@ -84,8 +97,12 @@ impl Activity {
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct State {
-  pub actors: Vec<ActorClient>,
   pub next_id: u32,
+  pub actors: Vec<ActorClient>,
+  pub clients: Vec<Client>,
+  pub loader_version: u32,
+  pub module_version: u32,
+  pub client_version: u32,
 
   #[serde(skip)]
   pub this: Option<AppState>,
@@ -102,15 +119,15 @@ pub struct State {
 impl State {
   pub fn new() -> Self {
     let path = format!("{}/state.bin", path());
-    let bytes = match fs::read(&path) {
-      Ok(bytes) => bytes,
+    let reader = match fs::File::open(&path) {
+      Ok(reader) => reader,
       Err(_) => return State::default()
     };
 
-    match deserialize_from(&bytes[..]) {
+    match deserialize_from(reader) {
       Ok(state) => state,
-      Err(_) => {
-        log::warn!("Failed to deserialize state, maybe the file is corrupted?");
+      Err(err) => {
+        log::warn!("Failed to deserialize state, maybe the file is corrupted? {}", err);
         State::default()
       }
     }
@@ -224,6 +241,10 @@ impl State {
 
   pub async fn set_actor_access(&mut self, id: u32, access: bool) -> Option<()> {
     let actor = self.actors.iter_mut().find(|actor| actor.id == id)?;
+    if actor.has_access == access {
+      return Some(());
+    }
+
     log::info!("Set access for actor {} to {}", actor.name, access);
     actor.has_access = access;
 
@@ -245,7 +266,7 @@ impl State {
     let results = future::join_all(futures).await;
     for result in results {
       if let Err(err) = result {
-        log::error!("Failed to send head event: {}", err);
+        log::warn!("Failed to send head event: {}", err);
       }
     }
   }
@@ -256,7 +277,7 @@ impl State {
     let results = future::join_all(futures).await;
     for result in results {
       if let Err(err) = result {
-        log::error!("Failed to send head event: {}", err);
+        log::warn!("Failed to send head event: {}", err);
       }
     }
   }
@@ -269,7 +290,7 @@ impl State {
 
     for result in results {
       if let Err(err) = result {
-        log::error!("Failed to send actor event: {}", err);
+        log::warn!("Failed to send actor event: {}", err);
       }
     }
   }
@@ -281,7 +302,7 @@ impl State {
     let results = future::join_all(futures).await;
     for result in results {
       if let Err(err) = result {
-        log::error!("Failed to send actor event: {}", err);
+        log::warn!("Failed to send actor event: {}", err);
       }
     }
   }
@@ -294,8 +315,70 @@ impl State {
     let results = future::join_all(futures_1.chain(futures_2)).await;
     for result in results {
       if let Err(err) = result {
-        log::error!("Failed to send event: {}", err);
+        log::warn!("Failed to send event: {}", err);
       }
     }
+  }
+}
+
+pub trait SseCleanupLoop {
+  fn start_cleanup_loop(&self);
+}
+
+impl SseCleanupLoop for AppState {
+  fn start_cleanup_loop(&self) {
+    let this = self.clone();
+    tokio::spawn(async move {
+      let mut interval = time::interval(CLEANUP_INTERVAL);
+      log::info!("Cleanup loop started");
+
+      loop {
+        interval.tick().await;
+        
+        let mut state = this.write().await;
+        let mut ids = HashSet::new();
+
+        let payload = SsePayload::Ping.into_event(state.next_ack(), None);
+        state.head_stream.retain(|tx| {
+          let is_closed = tx.is_closed() || tx.try_send(payload.clone()).is_err();
+          if is_closed {
+            log::info!("Head disconnected");
+          }
+
+          !is_closed
+        });
+        
+        state.actor_stream.retain(|(id, tx)| {
+          let is_closed = tx.is_closed() || tx.try_send(payload.clone()).is_err();
+          if is_closed {
+            log::info!("Actor {} disconnected", id);
+            ids.insert(*id);
+          }
+
+          !is_closed
+        });
+
+        ids.retain(|id| {
+          if state.actor_stream.iter().any(|(actor_id, _)| actor_id == id) {
+            return false;
+          }
+
+          match state.actors.iter_mut().find(|actor| actor.id == *id) {
+            Some(actor) => {
+              log::info!("Actor {} ({}) went offline", actor.id, actor.name);
+              actor.activity.set_offline();
+              true
+            },
+            None => false
+          }
+        });
+
+        if !ids.is_empty() {
+          let payload = HeadSsePayload::ActorsDisconnected(&ids);
+          state.broadcast_to_head(payload).await;
+          state.write();
+        }
+      }
+    });
   }
 }
