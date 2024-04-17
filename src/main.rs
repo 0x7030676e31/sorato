@@ -1,10 +1,10 @@
 #![feature(type_alias_impl_trait)]
 
+use crate::model::state::{SseCleanupLoop, State};
+pub use crate::auth::Auth;
+
 use std::sync::Arc;
 use std::{io, env};
-
-use model::state::{SseCleanupLoop, State};
-pub use auth::Auth;
 
 use actix_governor::{GovernorConfig, PeerIpKeyExtractor};
 use actix_governor::governor::middleware::NoOpMiddleware;
@@ -13,18 +13,13 @@ use actix_web::{App, HttpServer};
 use actix_web::web::Data;
 use tokio::sync::RwLock;
 
-// use actix_web::{App, Error, HttpServer, Scope};
-// use actix_web::body::{BoxBody, EitherBody};
-// use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
-
 mod model;
 mod routes;
 mod cors;
 mod auth;
+mod logger;
 
 pub type AppState = Arc<RwLock<State>>;
-// pub type Scoped = Scope<impl ServiceFactory<ServiceRequest, Config = (), Response = ServiceResponse, Error = actix_web::Error, InitError = ()>>;
-// pub type ScopedEx = Scope<impl ServiceFactory<ServiceRequest, Config = (), Response = ServiceResponse<EitherBody<BoxBody>>, Error = Error, InitError = ()>>;
 pub type Secure = GovernorConfig<PeerIpKeyExtractor, NoOpMiddleware<QuantaInstant>>;
 
 const PORT: u16 = 8080;
@@ -40,8 +35,7 @@ async fn main() -> io::Result<()> {
     env::set_var("RUST_LOG", "INFO");
   }
 
-  pretty_env_logger::init();
-
+  logger::init();
   log::info!("Starting server on port {}", PORT);
 
   let state = State::new();

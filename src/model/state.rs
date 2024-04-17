@@ -59,11 +59,12 @@ pub struct Client {
   pub hostname: String,
   pub username: String,
   pub last_ip: String,
+  pub versions: (u32, u32, u32), // Loader, Module, Client
   pub activity: Activity,
 }
 
+// Timestamp in ms
 #[derive(Serialize, Deserialize)]
-// #[serde(tag = "activity", content = "timestamp")]
 pub enum Activity {
   Online(u64),
   Offline(u64),
@@ -71,11 +72,11 @@ pub enum Activity {
 
 impl Activity {
   pub fn offline() -> Self {
-    Self::Offline(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())
+    Self::Offline(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64)
   }
 
   pub fn online() -> Self {
-    Self::Online(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())
+    Self::Online(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64)
   }
 
   pub fn set_offline(&mut self) {
@@ -95,11 +96,30 @@ impl Activity {
   }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct Audio {
+  pub id: u32,
+  pub name: String,
+  pub duration: u32, // in ms
+  pub downloads: HashSet<u32>,
+  pub author: Option<u32>,
+  pub created: u64, // in ms
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Group {
+  pub id: u32,
+  pub name: String,
+  pub members: HashSet<u32>,
+}
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct State {
   pub next_id: u32,
   pub actors: Vec<ActorClient>,
   pub clients: Vec<Client>,
+  pub library: Vec<Audio>,
+  pub groups: Vec<Group>,
   pub loader_version: u32,
   pub module_version: u32,
   pub client_version: u32,

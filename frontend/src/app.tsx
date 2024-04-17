@@ -4,6 +4,7 @@ import { getToken, setToken, useSse } from "./api";
 import Login from "./components/login";
 import Overlay from "./components/overlay";
 import Disabled from "./components/disabled";
+import Navbar from "./components/navbar";
 
 export default function App(props: RouteSectionProps) {
   const { loginShown, setLoginShown, connect, disabled, loading } = useSse();
@@ -32,7 +33,10 @@ export default function App(props: RouteSectionProps) {
 
   return (
     <div class="app">
-      {props.children}
+      <Navbar />
+      <div class="inner">
+        {props.children}
+      </div>
       <Overlay isLoading={() => loading()} />
       <Disabled isDisabled={() => disabled()} />
       <Login shown={loginShown} setShown={setShown} />

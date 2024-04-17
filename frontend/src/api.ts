@@ -25,9 +25,17 @@ type PayloadInner
 export const [ isHead, setIsHead ] = createSignal(false);
 window.getIsHead = () => isHead();
 
+export const [ clients, setClients ] = createSignal<Client[]>([]);
+window.getClients = () => clients();
+
+export const [ audio, setAudio ] = createSignal<Audio[]>([]);
+window.getAudio = () => audio();
+
+export const [ groups, setGroups ] = createSignal<Group[]>([]);
+window.getGroups = () => groups();
+
 export const [ actors, setActors ] = createSignal<Actor[]>([]);
 window.getActors = () => actors();
-
 
 class ServerSentEvents {
   private url: string;
