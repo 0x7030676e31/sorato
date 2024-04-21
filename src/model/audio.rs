@@ -7,7 +7,7 @@ use chrono::Utc;
 pub struct Audio {
   pub id: u32,
   pub title: String,
-  pub duration: u32, // in ms
+  pub length: u32, // in ms
   pub downloads: HashSet<u32>,
   pub author: Option<u32>,
   pub created: u64, // in ms
@@ -18,7 +18,7 @@ impl Audio {
     Self {
       id,
       title,
-      duration: 0,
+      length: 0,
       downloads: HashSet::new(),
       author,
       created: Utc::now().timestamp_millis() as u64,

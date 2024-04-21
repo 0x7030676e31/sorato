@@ -1,5 +1,5 @@
 import { For, createSignal } from "solid-js";
-import { audio, upload_audio } from "../api";
+import { audio, clients, upload_audio, uploading, actorsMinimal } from "../api";
 import styles from "./library.module.scss";
 
 export default function Library() {
@@ -22,7 +22,7 @@ export default function Library() {
     e.stopPropagation();
     setHover(false);
     
-    if (e.dataTransfer?.files.length !== 1) return;
+    if (e.dataTransfer?.files.length !== 1 || uploading()) return;
     const file = e.dataTransfer.files[0];
     upload_audio(file);
   }
@@ -31,7 +31,7 @@ export default function Library() {
     <div class={styles.library}>
       <div
         class={styles.overlay}
-        classList={{ [styles.hover]: hover() }}
+        classList={{ [styles.hover]: hover() && !uploading() }}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -45,17 +45,17 @@ export default function Library() {
         <thead>
           <tr>
             <th>Title</th>
-            <th>Downloads</th>
-            <th>Duration</th>
             <th>Author</th>
-            <td></td>
-            <td></td>
-            <td></td>
+            <th>Downloads</th>
+            <th>Length</th>
+            <th></th>
+            <th></th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           <For each={audio()}>
-            {() => <Audio />}
+            {audio => <Audio {...audio} />}
           </For>
         </tbody>
       </table>
@@ -64,10 +64,16 @@ export default function Library() {
 }
 
 
-type AudioProps = {};
-
-export function Audio(props: AudioProps) {
+export function Audio(props: Audio) {
   return (
-    <tr></tr>
+    <tr>
+      <td>{props.title}</td>
+      <td>{actorsMinimal().find(a => a.id === props.author)?.name ?? "Unknown"}</td>
+      <td>{props.downloads.length} / {clients().length}</td>
+      <td>{props.length}</td>
+      <td></td>
+      <td></td>
+      <td></td>
+    </tr>
   );
 }

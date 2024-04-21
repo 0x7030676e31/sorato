@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use tokio::time;
 use actix_web_lab::sse;
 use futures::future;
-use lofty::{Probe, FileType};
+use lofty::{AudioFile, FileType, Probe};
 
 const TOKEN_LENGTH: usize = 64;
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(15);
@@ -293,7 +293,13 @@ impl State {
       return Ok(None);
     }
 
-    Ok(Some(fs::metadata(&path)?.len() as u32))
+    let length = probe.read()?.properties().duration().as_millis() as u32;
+    let audio = self.library.iter_mut().find(|audio| audio.id == id).ok_or("Audio not found")?;
+    
+    audio.length = length;
+    self.write();
+
+    Ok(Some(length))
   }
 
   pub async fn broadcast_to_head(&mut self, payload: impl IntoEvent, nonce: Option<u64>) {

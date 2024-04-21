@@ -11,9 +11,22 @@
   background-color: $teal;
   box-shadow: 0 0 0.2rem $mauve;
   border-radius: 0 0.25rem 0.25rem 0;
-  transition: width 0.1s ease, background-color 0.3s ease;
+  transition: width 0.1s ease;
 }
 
-.done {
-  background-color: $green;
+.completed {
+  animation: complete 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes complete {
+  30% {
+    width: 100%;
+    background-color: $teal;
+    box-shadow: 0 0 0.2rem $mauve;
+  }
+  100% {
+    width: 100%;
+    background-color: transparent;
+    box-shadow: 0 0 0.2rem transparent;
+  }
 }

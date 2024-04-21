@@ -10,13 +10,12 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct AudioQuery {
-  nonce: u64,
   title: String,
 }
 
 async fn upload_audio(state: web::Data<AppState>, query: web::Query<AudioQuery>, mut payload: web::Payload, token: Token) -> HttpResponse {
   let mut state_ = state.write().await;
-  let AudioQuery { nonce, title } = query.into_inner();
+  let AudioQuery { title } = query.into_inner();
   log::info!("Uploading audio {}...", title);
 
   let actor_id = state_.token_to_id(&token.0);
@@ -58,7 +57,7 @@ async fn upload_audio(state: web::Data<AppState>, query: web::Query<AudioQuery>,
   };
 
   let sse_payload = SsePayload::AudioCreated { id, title: &title, length, author: actor_id };
-  state.broadcast_to_all(sse_payload, Some(nonce)).await;
+  state.broadcast_to_all(sse_payload, None).await;
 
   HttpResponse::Created().finish()
 }

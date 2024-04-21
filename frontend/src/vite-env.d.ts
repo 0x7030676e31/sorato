@@ -9,6 +9,7 @@ declare global {
     getTempAudio: () => Audio[];
     getGroups: () => Group[];
     getActors: () => Actor[];
+    getActorsMinimal: () => ActorMinimal[];
   }
 
   type Activity = { ["Online" | "Offline"]: number };
@@ -26,7 +27,7 @@ declare global {
   interface Audio {
     id: number;
     title: string;
-    duration: number;
+    length: number;
     downloads: number[];
     author: number | null;
     created: number;
@@ -44,6 +45,11 @@ declare global {
     name: string,
     has_access: boolean,
     activity: Activity,
+  }
+
+  interface ActorMinimal {
+    id: number;
+    name: string;
   }
 }
 
