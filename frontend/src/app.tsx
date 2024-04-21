@@ -1,5 +1,6 @@
 import { RouteSectionProps } from "@solidjs/router";
 import { onMount } from "solid-js";
+import { Progess } from './components/progress';
 import { getToken, setToken, useSse } from "./api";
 import Login from "./components/login";
 import Overlay from "./components/overlay";
@@ -33,6 +34,7 @@ export default function App(props: RouteSectionProps) {
 
   return (
     <div class="app">
+      <Progess />
       <Navbar />
       <div class="inner">
         {props.children}

@@ -1,10 +1,14 @@
 use super::stream::{HeadSsePayload, SsePayload, IntoEvent};
+use super::actor::ActorClient;
+use super::client::Client;
+use super::audio::Audio;
 use crate::AppState;
 
 use std::collections::HashSet;
+use std::error::Error;
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{env, fs};
+use std::{env, fs, io};
 
 use serde::{Deserialize, Serialize};
 use rand::{distributions, Rng};
@@ -13,9 +17,18 @@ use tokio::sync::mpsc;
 use tokio::time;
 use actix_web_lab::sse;
 use futures::future;
+use lofty::{Probe, FileType};
 
 const TOKEN_LENGTH: usize = 64;
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(15);
+const ACCEPTED_FORMATS: [FileType; 6] = [
+  FileType::Mpeg,
+  FileType::Wav,
+  FileType::Flac,
+  FileType::Mp4,
+  FileType::Aac,
+  FileType::Vorbis,
+];
 
 pub fn path() -> &'static str {
   static PATH: OnceLock<String> = OnceLock::new();
@@ -30,7 +43,7 @@ pub fn path() -> &'static str {
     }
 
     let path = env::var("HOME").unwrap() + "/.config/sorato";
-    if !fs::metadata(&path).is_ok() {
+    if fs::metadata(&path).is_err() {
       fs::create_dir_all(&path).unwrap();
     }
 
@@ -38,32 +51,7 @@ pub fn path() -> &'static str {
   })
 }
 
-fn create_token(length: usize) -> String {
-  rand::thread_rng().sample_iter(distributions::Alphanumeric).take(length).map(char::from).collect::<String>()
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ActorClient {
-  pub id: u32,
-  pub token: String,
-  pub name: String,
-  pub has_access: bool,
-  pub activity: Activity,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Client {
-  pub id: u32,
-  pub token: String,
-  pub alias: String,
-  pub hostname: String,
-  pub username: String,
-  pub last_ip: String,
-  pub versions: (u32, u32, u32), // Loader, Module, Client
-  pub activity: Activity,
-}
-
-// Timestamp in ms
+// * Timestamp in ms
 #[derive(Serialize, Deserialize)]
 pub enum Activity {
   Online(u64),
@@ -97,20 +85,14 @@ impl Activity {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Audio {
-  pub id: u32,
-  pub name: String,
-  pub duration: u32, // in ms
-  pub downloads: HashSet<u32>,
-  pub author: Option<u32>,
-  pub created: u64, // in ms
-}
-
-#[derive(Serialize, Deserialize)]
 pub struct Group {
   pub id: u32,
   pub name: String,
   pub members: HashSet<u32>,
+}
+
+fn create_token(length: usize) -> String {
+  rand::thread_rng().sample_iter(distributions::Alphanumeric).take(length).map(char::from).collect::<String>()
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -139,7 +121,7 @@ pub struct State {
 impl State {
   pub fn new() -> Self {
     let path = format!("{}/state.bin", path());
-    let reader = match fs::File::open(&path) {
+    let reader = match fs::File::open(path) {
       Ok(reader) => reader,
       Err(_) => return State::default()
     };
@@ -221,10 +203,14 @@ impl State {
     self.write();
 
     let ack = self.next_ack();
-    let payload = HeadSsePayload::ActorCreated(&self.actors.last().unwrap()).into_event(ack, None);
+    let payload = HeadSsePayload::ActorCreated(self.actors.last().unwrap()).into_event(ack, None);
     self.broadcast_to_head_raw(payload).await;
 
     Some(token)
+  }
+
+  pub fn token_to_id(&self, token: &str) -> Option<u32> {
+    self.actors.iter().find(|actor| actor.token == token).map(|actor| actor.id)
   }
 
   pub async fn rename_actor(&mut self, id: u32, name: String) -> Option<()> {
@@ -250,10 +236,10 @@ impl State {
     self.write();
     
     let payload = HeadSsePayload::ActorDeleted(id);
-    self.broadcast_to_head(payload).await;
+    self.broadcast_to_head(payload, None).await;
 
     let payload = SsePayload::AccessRevoked;
-    self.broadcast_to_actor(id, payload).await;
+    self.broadcast_to_actor(id, payload, None).await;
 
     self.actor_stream.retain(|(actor_id, _)| *actor_id != id);
     Some(())
@@ -271,16 +257,47 @@ impl State {
     self.write();
     
     let payload = SsePayload::AccessChanged(access);
-    self.broadcast_to_actor(id, payload).await;
+    self.broadcast_to_actor(id, payload, None).await;
 
     let payload = HeadSsePayload::ActorAccessChanged(id, access);
-    self.broadcast_to_head(payload).await;
+    self.broadcast_to_head(payload, None).await;
 
     Some(())
   }
 
-  pub async fn broadcast_to_head(&mut self, payload: impl IntoEvent) {
-    let payload = payload.into_event(self.next_ack(), None);
+  pub fn get_audio_writer(&mut self, title: String, author: Option<u32>) -> io::Result<(u32, fs::File)> {
+    let id = self.next_id();
+    let audio = Audio::new(id, title, author);
+
+    self.library.push(audio);
+    let dir = format!("{}/audio", path());
+
+    if fs::metadata(&dir).is_err() {
+      fs::create_dir_all(&dir)?;
+    }
+
+    let writer = fs::File::create(format!("{}/{}", dir, id))?;
+    Ok((id, writer))
+  }
+
+  pub fn finalize_audio_upload(&mut self, id: u32) -> Result<Option<u32>, Box<dyn Error>> {
+    let path = format!("{}/audio/{}", path(), id);
+    let probe = Probe::open(&path)?.guess_file_type()?;
+    let format = match probe.file_type() {
+      Some(format) => format,
+      None => return Ok(None),
+    };
+
+    if !ACCEPTED_FORMATS.contains(&format) {
+      fs::remove_file(&path)?;
+      return Ok(None);
+    }
+
+    Ok(Some(fs::metadata(&path)?.len() as u32))
+  }
+
+  pub async fn broadcast_to_head(&mut self, payload: impl IntoEvent, nonce: Option<u64>) {
+    let payload = payload.into_event(self.next_ack(), nonce);
     let futures = self.head_stream.iter().map(|tx| tx.send(payload.clone()));
 
     let results = future::join_all(futures).await;
@@ -302,8 +319,8 @@ impl State {
     }
   }
 
-  pub async fn broadcast_to_actor(&mut self, actor_id: u32, payload: SsePayload) {
-    let payload = payload.into_event(self.next_ack(), None);
+  pub async fn broadcast_to_actor<'a>(&mut self, actor_id: u32, payload: SsePayload<'a>, nonce: Option<u64>) {
+    let payload = payload.into_event(self.next_ack(), nonce);
 
     let futures = self.actor_stream.iter().filter_map(|(id, tx)| if *id == actor_id { Some(tx.send(payload.clone())) } else { None });
     let results = future::join_all(futures).await;
@@ -315,8 +332,8 @@ impl State {
     }
   }
 
-  pub async fn broadcast_to_actor_all(&mut self, payload: SsePayload) {
-    let payload = payload.into_event(self.next_ack(), None);
+  pub async fn broadcast_to_actor_all<'a>(&mut self, payload: SsePayload<'a>, nonce: Option<u64>) {
+    let payload = payload.into_event(self.next_ack(), nonce);
     let futures = self.actor_stream.iter().map(|(_, tx)| tx.send(payload.clone()));
 
     let results = future::join_all(futures).await;
@@ -327,8 +344,8 @@ impl State {
     }
   }
 
-  pub async fn broadcast_to_all(&mut self, payload: impl IntoEvent) {
-    let payload = payload.into_event(self.next_ack(), None);
+  pub async fn broadcast_to_all(&mut self, payload: impl IntoEvent, nonce: Option<u64>) {
+    let payload = payload.into_event(self.next_ack(), nonce);
     let futures_1 = self.actor_stream.iter().map(|(_, tx)| tx.send(payload.clone()));
     let futures_2 = self.head_stream.iter().map(|tx| tx.send(payload.clone()));
 
@@ -395,7 +412,7 @@ impl SseCleanupLoop for AppState {
 
         if !ids.is_empty() {
           let payload = HeadSsePayload::ActorsDisconnected(&ids);
-          state.broadcast_to_head(payload).await;
+          state.broadcast_to_head(payload, None).await;
           state.write();
         }
       }

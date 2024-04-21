@@ -3,6 +3,7 @@ use actix_web::Scope;
 mod v1actor;
 mod v1client;
 mod assets;
+mod extractor;
 
 pub fn routes() -> Scope {
   Scope::new("")

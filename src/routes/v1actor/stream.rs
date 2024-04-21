@@ -1,4 +1,6 @@
 use crate::model::stream::{HeadSsePayload, SsePayload, IntoEvent};
+use crate::model::client::Wrap as _;
+use crate::model::actor::Wrap as _;
 use crate::AppState;
 
 use std::env;
@@ -8,7 +10,7 @@ use actix_web_lab::sse::Sse;
 use tokio::sync::mpsc;
 
 #[get("/stream")]
-pub async fn stream(state: web::Data<AppState>, req: HttpRequest) -> Result<impl Responder, error::Error> {
+pub async fn stream(req: HttpRequest, state: web::Data<AppState>) -> Result<impl Responder, error::Error> {
   let auth = match req.headers().get("Authorization") {
     Some(auth) => auth,
     None => return Err(error::ErrorUnauthorized("Unauthorized")),
@@ -27,7 +29,9 @@ pub async fn stream(state: web::Data<AppState>, req: HttpRequest) -> Result<impl
     let ack = state.next_ack();
 
     let payload = HeadSsePayload::ReadyHead {
-      actors: &state.actors,
+      clients: state.clients.wrap(false),
+      actors: state.actors.wrap(false),
+      library: &state.library,
     };
 
     let payload= payload.into_event(ack, None);
@@ -51,7 +55,7 @@ pub async fn stream(state: web::Data<AppState>, req: HttpRequest) -> Result<impl
     actor.activity.set_online();
     let payload = HeadSsePayload::ActorConnected(actor.id);
 
-    state.broadcast_to_head(payload).await;
+    state.broadcast_to_head(payload, None).await;
   }
 
   log::info!("Actor {} connected", actor_id);
@@ -59,9 +63,15 @@ pub async fn stream(state: web::Data<AppState>, req: HttpRequest) -> Result<impl
 
   let ack = state.next_ack();
   
-  let payload = SsePayload::Ready { has_access };
-  let payload = payload.into_event(ack, None);
+  let payload = SsePayload::Ready {
+    clients: state.clients.wrap(false),
+    actors: state.actors.wrap(true),
+    library: &state.library,
+    has_access,
+    id: actor_id,
+  };
   
+  let payload = payload.into_event(ack, None);
   if let Err(err) = tx.send(payload).await {
     log::error!("Failed to send ready event: {}", err);
   }  

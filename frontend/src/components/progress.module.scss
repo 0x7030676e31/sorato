@@ -1,0 +1,19 @@
+@import "../palette.scss";
+
+.progress {
+  width: calc(100% + 0.25rem);
+  height: 0.4rem;
+  background-color: $mantle;
+}
+
+.bar {
+  height: 0.2rem;
+  background-color: $teal;
+  box-shadow: 0 0 0.2rem $mauve;
+  border-radius: 0 0.25rem 0.25rem 0;
+  transition: width 0.1s ease, background-color 0.3s ease;
+}
+
+.done {
+  background-color: $green;
+}

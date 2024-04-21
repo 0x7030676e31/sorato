@@ -1,13 +1,12 @@
 @import "../palette.scss";
 
-
 .navbar {
   width: 100%;
   border-bottom: 2px solid $surface0;
   background-color: $mantle;
   display: flex;
   box-sizing: border-box;
-  padding: 0.5rem 0 0 0.5rem;
+  padding: 0 0 0 0.5rem;
 }
 
 .tab {

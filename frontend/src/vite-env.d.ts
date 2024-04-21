@@ -6,17 +6,37 @@ declare global {
     getIsHead: () => boolean;
     getClients: () => Client[];
     getAudio: () => Audio[];
+    getTempAudio: () => Audio[];
     getGroups: () => Group[];
     getActors: () => Actor[];
   }
 
   type Activity = { ["Online" | "Offline"]: number };
 
-  interface Client {}
+  interface Client {
+    id: number;
+    alias: string;
+    hostname: string;
+    username: string;
+    last_ip: string;
+    versions: [number, number, number]; // Loader, Module, Client
+    activity: Activity;
+  }
 
-  interface Audio {}
+  interface Audio {
+    id: number;
+    title: string;
+    duration: number;
+    downloads: number[];
+    author: number | null;
+    created: number;
+  }
 
-  interface Group {}
+  interface Group {
+    id: number;
+    name: string;
+    members: number[];
+  }
 
   interface Actor {
     id: number;

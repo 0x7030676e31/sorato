@@ -5,7 +5,7 @@ use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 #[get("/assets/{file:.*}")]
 pub async fn assets(req: HttpRequest, file: web::Path<String>) -> impl Responder {
   let file = file.into_inner();
-  if file.contains("/") {
+  if file.contains('/') {
     return HttpResponse::BadRequest().finish();
   }
 
