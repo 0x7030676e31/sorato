@@ -14,11 +14,11 @@ pub struct Audio {
 }
 
 impl Audio {
-  pub fn new(id: u32, title: String, author: Option<u32>) -> Self {
+  pub fn new(id: u32, title: String, author: Option<u32>, length: u32) -> Self {
     Self {
       id,
       title,
-      length: 0,
+      length,
       downloads: HashSet::new(),
       author,
       created: Utc::now().timestamp_millis() as u64,

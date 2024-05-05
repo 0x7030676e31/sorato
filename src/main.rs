@@ -1,7 +1,8 @@
 #![feature(type_alias_impl_trait)]
 
 use crate::model::state::{SseCleanupLoop, State};
-pub use crate::auth::Auth;
+use crate::middleware::cors::Cors;
+pub use crate::middleware::auth::Auth;
 
 use std::sync::Arc;
 use std::{io, env};
@@ -15,8 +16,7 @@ use tokio::sync::RwLock;
 
 mod model;
 mod routes;
-mod cors;
-mod auth;
+mod middleware;
 mod logger;
 
 pub type AppState = Arc<RwLock<State>>;
@@ -53,7 +53,7 @@ async fn main() -> io::Result<()> {
   HttpServer::new(move || {
     App::new()
       .app_data(Data::new(state.clone()))
-      .wrap(cors::Cors)
+      .wrap(Cors)
       .service(routes::routes())
   })
   .bind((ip, PORT))?

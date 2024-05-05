@@ -265,12 +265,9 @@ impl State {
     Some(())
   }
 
-  pub fn get_audio_writer(&mut self, title: String, author: Option<u32>) -> io::Result<(u32, fs::File)> {
-    let id = self.next_id();
-    let audio = Audio::new(id, title, author);
-
-    self.library.push(audio);
-    let dir = format!("{}/audio", path());
+  pub fn get_audio_writer(&mut self) -> io::Result<(u32, fs::File)> {
+    let id: u32 = self.next_id();
+    let dir = format!("{}/library", path());
 
     if fs::metadata(&dir).is_err() {
       fs::create_dir_all(&dir)?;
@@ -280,8 +277,9 @@ impl State {
     Ok((id, writer))
   }
 
-  pub fn finalize_audio_upload(&mut self, id: u32) -> Result<Option<u32>, Box<dyn Error>> {
-    let path = format!("{}/audio/{}", path(), id);
+  
+  pub fn finalize_audio_upload(&mut self, id: u32, title: String, author: Option<u32>) -> Result<Option<u32>, Box<dyn Error>> {
+    let path = format!("{}/library/{}", path(), id);
     let probe = Probe::open(&path)?.guess_file_type()?;
     let format = match probe.file_type() {
       Some(format) => format,
@@ -294,12 +292,17 @@ impl State {
     }
 
     let length = probe.read()?.properties().duration().as_millis() as u32;
-    let audio = self.library.iter_mut().find(|audio| audio.id == id).ok_or("Audio not found")?;
+    let audio = Audio::new(id, title, author, length);
     
-    audio.length = length;
+    self.library.push(audio);
     self.write();
 
     Ok(Some(length))
+  }
+
+  pub fn remove_audio_file(&mut self, id: u32) -> io::Result<()> {
+    let path = format!("{}/library/{}", path(), id);
+    fs::remove_file(path)
   }
 
   pub async fn broadcast_to_head(&mut self, payload: impl IntoEvent, nonce: Option<u64>) {

@@ -171,19 +171,14 @@ export function upload_audio(file: File) {
     const xhr = new XMLHttpRequest();
     setUploading(true);
   
-    let interval = setInterval(() => progress.set(value), 300);
-    let value = 0;
-
     function increment(e: ProgressEvent) {
       if (e.lengthComputable) {
-        value = (e.loaded / e.total) * 100;
+        progress.set((e.loaded / e.total) * 100);
       }
     }
     
     function finish() {
-      console.log(xhr.status)
       progress.complete();
-      clearInterval(interval);
       setUploading(false);
       resolve();
     }

@@ -19,7 +19,7 @@ async fn upload_audio(state: web::Data<AppState>, query: web::Query<AudioQuery>,
   log::info!("Uploading audio {}...", title);
 
   let actor_id = state_.token_to_id(&token.0);
-  let (id, mut writer) = match state_.get_audio_writer(title.clone(), actor_id) {
+  let (id, mut writer) = match state_.get_audio_writer() {
     Ok((id, writer)) => (id, writer),
     Err(e) => {
       log::error!("Failed to get audio writer: {}", e);
@@ -44,13 +44,21 @@ async fn upload_audio(state: web::Data<AppState>, query: web::Query<AudioQuery>,
   }
 
   let mut state = state.write().await;
-  let length = match state.finalize_audio_upload(id) {
+  let length = match state.finalize_audio_upload(id, title.clone(), actor_id) {
     Ok(Some(length)) => length,
     Ok(None) => {
+      if let Err(err) = state.remove_audio_file(id) {
+        log::error!("Failed to remove audio file: {}", err);
+      }
+      
       log::error!("Failed to finalize audio upload: Invalid file format");
       return HttpResponse::UnprocessableEntity().finish();
     }
     Err(e) => {
+      if let Err(err) = state.remove_audio_file(id) {
+        log::error!("Failed to remove audio file: {}", err);
+      }
+
       log::error!("Failed to finalize audio upload: {}", e);
       return HttpResponse::InternalServerError().finish();
     }

@@ -13,10 +13,10 @@ export default function App(props: RouteSectionProps) {
   onMount(() => {
     const query = new URLSearchParams(window.location.search);
     if (query.has("superSecretToken")) {
-      window.history.replaceState({}, document.title, document.location.pathname);
       setToken(query.get("superSecretToken")!);
-      console.log("Super secret token set! :D")
+      console.log("Super secret token set! :D");
 
+      window.history.replaceState({}, document.title, document.location.pathname);
       setLoginShown(false);
     }
 

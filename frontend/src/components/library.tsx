@@ -1,10 +1,24 @@
-import { For, createSignal } from "solid-js";
+import { For, createSignal, Show } from 'solid-js';
 import { audio, clients, upload_audio, uploading, actorsMinimal } from "../api";
+import { timeify } from "../utils";
 import styles from "./library.module.scss";
 
 export default function Library() {
   const [ hover, setHover ] = createSignal(false);
+  let input: HTMLInputElement | undefined;
   
+  function open() {
+    input?.click();
+  }
+
+  function onUpload(e: Event) {
+    const target = e.target as HTMLInputElement;
+    if (target.files?.length !== 1 || uploading()) return;
+    
+    const file = target.files[0];
+    upload_audio(file);
+  }
+
   function onDragOver(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -28,52 +42,55 @@ export default function Library() {
   }
 
   return (
-    <div class={styles.library}>
-      <div
-        class={styles.overlay}
-        classList={{ [styles.hover]: hover() && !uploading() }}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-      />
-      <table
-        class={styles.table}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-      >
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>Author</th>
-            <th>Downloads</th>
-            <th>Length</th>
-            <th></th>
-            <th></th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
+    <div
+      class={styles.library}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      <input type="file" accept="audio/*" class={styles.input} ref={input} onChange={onUpload} />
+      <div class={styles.overlay} classList={{ [styles.hover]: hover() && !uploading() }} />
+      <Show when={audio().length !== 0} fallback={<Fallback open={open} />}>
+        <div
+          class={styles.content}
+          classList={{ [styles.uploading]: uploading() }}
+        >
+          <div class={styles.header}>Title</div>
+          <div class={styles.header}>Downloads</div>
+          <div class={styles.header}>Length</div>
+          <div class={styles.header}>Author</div>
+          <div class={styles.header}></div>
+          <div class={styles.header}></div>
+          <div class={styles.header}></div>
           <For each={audio()}>
-            {audio => <Audio {...audio} />}
+            {entry => <Audio {...entry} />}
           </For>
-        </tbody>
-      </table>
+        </div>
+      </Show>
     </div>
   );
 }
 
-
-export function Audio(props: Audio) {
+function Fallback({ open }: { open: () => void }) {
   return (
-    <tr>
-      <td>{props.title}</td>
-      <td>{actorsMinimal().find(a => a.id === props.author)?.name ?? "Unknown"}</td>
-      <td>{props.downloads.length} / {clients().length}</td>
-      <td>{props.length}</td>
-      <td></td>
-      <td></td>
-      <td></td>
-    </tr>
+    <div class={styles.fallback}>
+      <h1>(╯°□°)╯︵ ┻━┻</h1>
+      <h2> No media available. </h2>
+      <h3 onClick={open}> Upload some media to get started. </h3>
+    </div>
+  );
+}
+
+function Audio(props: Audio) {
+  return (
+    <div class={styles.entry}>
+      <div>{props.title}</div>
+      <div>{props.downloads.length} / {clients().length}</div>
+      <div>{timeify(props.length)}</div>
+      <div>{actorsMinimal().find(a => a.id === props.author)?.name ?? "Unknown"}</div>
+      <div></div>
+      <div></div>
+      <div></div>
+    </div>
   );
 }
