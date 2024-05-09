@@ -4,6 +4,7 @@
 declare global {
   interface Window {
     getIsHead: () => boolean;
+    getClientId: () => number;
     getClients: () => Client[];
     getAudio: () => Audio[];
     getTempAudio: () => Audio[];

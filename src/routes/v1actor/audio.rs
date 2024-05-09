@@ -70,12 +70,43 @@ async fn upload_audio(state: web::Data<AppState>, query: web::Query<AudioQuery>,
   HttpResponse::Created().finish()
 }
 
+#[derive(Deserialize)]
+struct RemoveAudioQuery {
+  nonce: Option<u64>,
+}
+
+async fn remove_audio(state: web::Data<AppState>, token: Token, id: web::Path<u32>, query: web::Query<RemoveAudioQuery>) -> HttpResponse {
+  let mut state = state.write().await;
+  
+  let actor_id = state.token_to_id(&token.0);
+  let audio = match state.get_audio(*id) {
+    Some(audio) => audio,
+    None => return HttpResponse::NotFound().finish(),
+  };
+
+  if audio.author != actor_id {
+    return HttpResponse::Forbidden().finish();
+  }
+
+  let _ = state.remove_audio(*id);
+  let payload = SsePayload::AudioDeleted(*id);
+
+  state.broadcast_to_all(payload, query.nonce).await;
+  log::info!("Removed audio {}", *id);
+
+  HttpResponse::Ok().finish()
+}
+
 pub fn routes() -> Scope {
   Scope::new("/audio")
     .service(
       web::resource("/upload")
         .wrap(Auth::both())
-        .route(web::post().to(upload_audio)
+        .route(web::post().to(upload_audio))
     )
-  )
+    .service(
+      web::resource("/{id}")
+        .wrap(Auth::both())
+        .route(web::delete().to(remove_audio))
+    )
 }

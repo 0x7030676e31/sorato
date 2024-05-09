@@ -1,5 +1,6 @@
 import { For, createSignal, Show } from 'solid-js';
-import { audio, clients, upload_audio, uploading, actorsMinimal } from "../api";
+import { audio, clients, upload_audio, uploading, actorsMinimal, actorId, isHead, delete_audio as remove_audio } from "../api";
+import { AiTwotoneDelete } from "solid-icons/ai";
 import { timeify } from "../utils";
 import styles from "./library.module.scss";
 
@@ -90,7 +91,17 @@ function Audio(props: Audio) {
       <div>{actorsMinimal().find(a => a.id === props.author)?.name ?? "Unknown"}</div>
       <div></div>
       <div></div>
-      <div></div>
+      <div class={styles.iconWrapper}>
+        <div  
+          onClick={() => (props.author === actorId() || isHead()) && remove_audio(props.id)}
+          class={`${styles.icon} ${styles.delete}`}
+          classList={{
+            [styles.disabled]: props.author !== actorId() && !isHead(),
+          }}
+        >
+          <AiTwotoneDelete />
+        </div>
+      </div>
     </div>
   );
 }

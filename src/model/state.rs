@@ -305,6 +305,26 @@ impl State {
     fs::remove_file(path)
   }
 
+  pub fn remove_audio(&mut self, id: u32) -> Option<()> {
+    let index = self.library.iter().position(|audio| audio.id == id)?;
+    self.library.remove(index);
+    self.write();
+
+    if let Err(err) = self.remove_audio_file(id) {
+      log::error!("Failed to remove audio file: {}", err);
+    }
+
+    Some(())
+  }
+
+  pub fn get_audio(&self, id: u32) -> Option<&Audio> {
+    self.library.iter().find(|audio| audio.id == id)
+  }
+
+  pub fn get_audio_mut(&mut self, id: u32) -> Option<&mut Audio> {
+    self.library.iter_mut().find(|audio| audio.id == id)
+  }
+
   pub async fn broadcast_to_head(&mut self, payload: impl IntoEvent, nonce: Option<u64>) {
     let payload = payload.into_event(self.next_ack(), nonce);
     let futures = self.head_stream.iter().map(|tx| tx.send(payload.clone()));

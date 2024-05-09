@@ -31,6 +31,7 @@ pub enum SsePayload<'a> {
     length: u32,
     author: Option<u32>,
   },
+  AudioDeleted(u32),
 }
 
 #[derive(Serialize)]

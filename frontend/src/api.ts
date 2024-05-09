@@ -24,9 +24,11 @@ export type PayloadInner
   | { type: "AccessChanged", payload: boolean }
   | { type: "AccessRevoked" }
   | { type: "AudioCreated", payload: { author: number | null, id: number, title: string, length: number, created: number } }
+  | { type: "AudioDeleted", payload: number }
   | { type: "Ping" };
 
 export const [ isHead, setIsHead ] = createSignal(false);
+export const [ actorId, setActorId ] = createSignal(-1);
 export const [ clients, setClients ] = createSignal<Client[]>([]);
 export const [ audio, setAudio ] = createSignal<Audio[]>([]);
 export const [ tempAudio, setTempAudio ] = createSignal<Audio[]>([]);
@@ -35,6 +37,7 @@ export const [ actors, setActors ] = createSignal<Actor[]>([]);
 export const [ actorsMinimal, setActorsMinimal ] = createSignal<ActorMinimal[]>([]);
 
 window.getIsHead = () => isHead();
+window.getClientId = () => actorId();
 window.getClients = () => clients();
 window.getAudio = () => audio();
 window.getTempAudio = () => tempAudio();
@@ -54,7 +57,6 @@ export function authorize(code: string): Promise<Response> {
   });
 }
 
-//@ts-ignore
 function get_nonce() {
   const nonce = Math.floor(Date.now() * Math.random());
   setTimeout(() => nonces.delete(nonce), 60_000);
@@ -91,6 +93,7 @@ export function useSse() {
         console.log("Hello, Sorato!");
         batch(() => {
           setLoading(false);
+          setActorId(inner.payload.id);
           setDisabled(!inner.payload.has_access);
           setAudio(inner.payload.library);
           setClients(inner.payload.clients);
@@ -130,6 +133,12 @@ export function useSse() {
           setAudio(a => [...a, { ...inner.payload, downloads: [] }]);
         });
         break;
+
+      case "AudioDeleted":
+        batch(() => {
+          setAudio(a => a.filter(audio => audio.id !== inner.payload));
+        });
+        break;
     }
   }
 
@@ -145,10 +154,11 @@ export function useSse() {
     });
 
     await sse.connect();
-    console.log("Token deauthorized");
     sse = null;
 
+    console.log("Token deauthorized");
     removeToken();
+
     batch(() => {
       setLoginShown(true);
       setLoading(false);
@@ -190,5 +200,17 @@ export function upload_audio(file: File) {
     xhr.open("POST", `${base_url}/api/v1actor/audio/upload?title=${title}`, true);
     xhr.setRequestHeader("Authorization", getToken()!);
     xhr.send(file);
+  });
+}
+
+export async function delete_audio(id: number) {
+  setAudio(a => a.filter(audio => audio.id !== id));
+  
+  const nonce = get_nonce();
+  await fetch(`${base_url}/api/v1actor/audio/${id}?nonce=${nonce}`, {
+    method: "DELETE",
+    headers: {
+      "Authorization": getToken()!
+    }
   });
 }
